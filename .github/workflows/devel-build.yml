@@ -1,8 +1,7 @@
-name: Cardinal CI workflow
-run-name: Cardinal CI workflow run
+name: Test R-universe
 on:
-  - push:
-  - pull_request:
+  - push
+  - pull_request
 jobs:
   build:
     runs-on: R-universe testing
