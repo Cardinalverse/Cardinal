@@ -4,7 +4,7 @@ on:
   - pull_request
 jobs:
   build:
-    runs-on: R-universe testing
+    name: R-universe testing
     uses: r-universe-org/workflows/.github/workflows/build.yml@v3
     with:
       universe: ${{ github.repository_owner }}
