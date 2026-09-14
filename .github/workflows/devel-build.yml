@@ -1,13 +1,11 @@
 name: Cardinal CI workflow
 run-name: Cardinal CI workflow run
 on:
-  - push
+  - push:
+  - pull_request:
 jobs:
   build:
-    # TODO confirm the base image we should use. "latest"
-    # leaves us open to unexpected breakage if there's a
-    # breaking change in the base image; we should control
-    # when we update the base.
-    runs-on: ubuntu-latest
-    steps:
-      - run: echo "Running the Cardinal CI workflow. Triggered by ${{ github.event_name }}"
+    runs-on: R-universe testing
+    uses: r-universe-org/workflows/.github/workflows/build.yml@v3
+    with:
+      universe: ${{ github.repository_owner }}
