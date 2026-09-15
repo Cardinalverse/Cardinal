@@ -1,0 +1,16 @@
+# This workflow is directly ripped off from # the Bioconductor docs:
+# https://docs.r-universe.dev/bioconductor/#debugging-the-ci
+name: Test R-universe
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    name: R-universe testing
+    uses: r-universe-org/workflows/.github/workflows/build.yml@v3
+    with:
+      universe: bioc
+# Trying this out - does omitting the organization skip the BiocCheck task?
+      # organization: bioconductor # for BiocCheck checks
