@@ -12,4 +12,5 @@ jobs:
     uses: r-universe-org/workflows/.github/workflows/build.yml@v3
     with:
       universe: bioc
-      organization: bioconductor # for BiocCheck checks
+# Trying this out - does omitting the organization skip the BiocCheck task?
+      # organization: bioconductor # for BiocCheck checks
