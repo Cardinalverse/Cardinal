@@ -178,6 +178,7 @@ exportMethods(
 	"features",
 	"fetch",
 	"flash",
+	"findIsotopes",
 	"findNeighbors",
 	"fitted",
 	"fData",
