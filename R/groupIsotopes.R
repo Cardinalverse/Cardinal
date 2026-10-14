@@ -1,12 +1,11 @@
 
-#### Find isotopes ####
-## --------------------
+#### Group isotopes ####
+## ---------------------
 
-setMethod("findIsotopes", "MSImagingExperiment",
+setMethod("groupIsotopes", "MSImagingExperiment",
 	function(object, tolerance, units = c("ppm", "mz"),
-		charge = 1L, spacing = 1.0033548, maxOrder = 3L, maxGroupOrder = 6L,
+		charge = 1L, maxOrder = 3L, maxGroupOrder = 6L,
 		ratioBound = 2, fdr = 0.05, ndecoy = 100L,
-		runAgg = c("median", "min", "mean"),
 		minRuns = 1L, minPixels = 20L,
 		verbose = getCardinalVerbose(), chunkopts = list(),
 		BPPARAM = getCardinalBPPARAM(), ...)
@@ -14,31 +13,31 @@ setMethod("findIsotopes", "MSImagingExperiment",
 	if ( missing(units) && !missing(tolerance) )
 		units <- get_units_from_names(tolerance, units)
 	units <- match.arg(units)
-	runAgg <- match.arg(runAgg)
-	if ( !isTRUE(isCentroided(object)) )
+	if ( isFALSE(centroided(object)) )
 		.Error("spectra must be centroided; use peakProcess() first")
 	if ( length(processingData(object)) > 0L )
 		.Warn("queued processing steps will be ignored")
+	if ( length(tolerance) != 1L || !isTRUE(tolerance > 0) )
+		.Error("'tolerance' must be a single positive number")
 	if ( charge < 1 || charge %% 1 != 0 )
 		.Error("'charge' must be a positive integer")
 	if ( maxOrder < 1 || maxGroupOrder < maxOrder )
 		.Error("'maxOrder' must be at least 1 and at most 'maxGroupOrder'")
 	if ( !is.na(ratioBound) && ratioBound <= 0 )
 		.Error("'ratioBound' must be positive or NA")
-	if ( fdr <= 0 || fdr >= 1 )
+	if ( !isTRUE(fdr > 0 && fdr < 1) )
 		.Error("'fdr' must be between 0 and 1")
 	if ( ndecoy < 1 )
 		.Error("'ndecoy' must be at least 1")
 	mz <- mz(object)
 	if ( length(mz) < 2L || is.unsorted(mz, strictly=TRUE) )
 		.Error("m/z values must be unique and sorted")
-	step <- spacing / charge
+	step <- 1.0033548 / charge
 	tol <- switch(units,
 		ppm=1e-6 * tolerance * mz,
 		mz=rep_len(tolerance, length(mz)))
-	if ( tolerance <= 0 || max(tol) >= 0.5 * step )
-		.Error("tolerance must be positive and less than ",
-			"half the isotope spacing")
+	if ( max(tol) >= 0.5 * step )
+		.Error("tolerance must be less than half the isotope spacing")
 	if ( mean(diff(mz) <= tol[-1L]) > 0.5 )
 		.Warn("many features are closer than the tolerance; ",
 			"check that spectra are peak-picked")
@@ -58,57 +57,55 @@ setMethod("findIsotopes", "MSImagingExperiment",
 	i <- c(targets$i, decoys$i)
 	j <- c(targets$j, decoys$j)
 	cors <- .isotope_cor(object, i, j, minPixels,
-		verbose=verbose, chunkopts=chunkopts, BPPARAM=BPPARAM, ...)
+		verbose=verbose, chunkopts=chunkopts, BPPARAM=BPPARAM)
 	runScores <- cors$scores
-	nRuns <- rowSums(!is.na(runScores))
+	nruns <- rowSums(!is.na(runScores))
 	score <- rep.int(NA_real_, length(i))
-	ok <- nRuns >= max(1L, minRuns)
-	FUN <- match.fun(runAgg)
-	score[ok] <- apply(runScores[ok,,drop=FALSE], 1L, FUN, na.rm=TRUE)
+	ok <- nruns >= max(1L, minRuns)
+	score[ok] <- apply(runScores[ok,,drop=FALSE], 1L, median, na.rm=TRUE)
 	targets$score <- score[seq_len(nt)]
-	targets$nRuns <- nRuns[seq_len(nt)]
+	targets$nruns <- nruns[seq_len(nt)]
 	decoys$score <- score[-seq_len(nt)]
-	decoys$nRuns <- nRuns[-seq_len(nt)]
+	decoys$nruns <- nruns[-seq_len(nt)]
 	# intensity ratios and their all-carbon upper bound (13C only)
-	lambda <- 0.0107 * floor(charge * targets$mz_i / 12)
+	lambda <- 0.0107 / 0.9893 * floor(charge * targets$mz.i / 12)
 	targets$ratio <- apply(cors$slopes[seq_len(nt),,drop=FALSE], 1L,
 		median, na.rm=TRUE)
-	targets$ratioMax <- lambda^targets$order / factorial(targets$order)
+	targets$bound <- lambda^targets$order / factorial(targets$order)
 	# estimate q-values and group isotopes
-	targets$q <- .isotope_qvalues(targets$score, decoys$score)
-	pass <- !is.na(targets$q) & targets$q <= fdr
+	targets$fdr <- .isotope_qvalues(targets$score, decoys$score)
+	pass <- !is.na(targets$fdr) & targets$fdr <= fdr
 	targets$status <- ifelse(is.na(targets$score), "not_evaluable", "fdr")
 	if ( !is.na(ratioBound) ) {
 		high <- pass & !is.na(targets$ratio) &
-			targets$ratio > ratioBound * targets$ratioMax
+			targets$ratio > ratioBound * targets$bound
 		targets$status[high] <- "ratio"
 		pass <- pass & !high
 	}
 	if ( !any(pass) )
 		.Warn("no isotope pairs pass fdr = ", fdr)
 	groups <- .merge_isotopes(length(mz), targets$i[pass], targets$j[pass],
-		targets$order[pass], targets$score[pass], targets$residPpm[pass],
+		targets$order[pass], targets$score[pass], targets$ppm[pass],
 		maxGroupOrder)
 	targets$status[pass] <- groups$status
 	.Log("found ", sum(groups$status == "accepted"), " isotope links ",
 		"at fdr = ", fdr, message=verbose)
 	# build results
 	group <- as.integer(factor(groups$root))
-	ans <- MassDataFrame(mz=mz,
-		isotopeGroup=group,
-		isotopeOrder=groups$order,
-		groupSize=tabulate(group)[group],
-		linkScore=NA_real_, linkQ=NA_real_)
-	linked <- targets[targets$status %in% c("accepted", "redundant"),,drop=FALSE]
+	scores <- data.frame(group=group, isotope=groups$order,
+		size=tabulate(group)[group], score=NA_real_, fdr=NA_real_)
+	linked <- targets$status %in% c("accepted", "redundant")
+	linked <- targets[linked,,drop=FALSE]
 	linked <- linked[order(linked$score, decreasing=TRUE),,drop=FALSE]
 	k <- as.vector(rbind(linked$i, linked$j))
 	best <- !duplicated(k)
-	ans$linkScore[k[best]] <- rep(linked$score, each=2L)[best]
-	ans$linkQ[k[best]] <- rep(linked$q, each=2L)[best]
+	scores$score[k[best]] <- rep(linked$score, each=2L)[best]
+	scores$fdr[k[best]] <- rep(linked$fdr, each=2L)[best]
+	ans <- .rank_featureData(object, scores, "none")
 	params <- list(tolerance=tolerance, units=units, charge=charge,
-		spacing=spacing, maxOrder=maxOrder, maxGroupOrder=maxGroupOrder,
+		maxOrder=maxOrder, maxGroupOrder=maxGroupOrder,
 		ratioBound=ratioBound, fdr=fdr, ndecoy=ndecoy, minGap=minGap,
-		runAgg=runAgg, minRuns=minRuns, minPixels=minPixels)
+		minRuns=minRuns, minPixels=minPixels)
 	metadata(ans) <- list(pairs=targets, decoys=decoys,
 		runScores=runScores[seq_len(nt),,drop=FALSE], params=params)
 	ans
@@ -123,11 +120,11 @@ setMethod("findIsotopes", "MSImagingExperiment",
 		n <- pmax(hi - lo + 1L, 0L)
 		i <- rep.int(seq_along(mz), n)
 		j <- as.integer(unlist(Map(seq.int, lo[n > 0L], hi[n > 0L])))
-		data.frame(i=i, j=j, mz_i=mz[i], mz_j=mz[j],
+		data.frame(i=i, j=j, mz.i=mz[i], mz.j=mz[j],
 			order=rep.int(k, length(i)))
 	})
 	ans <- do.call(rbind, ans)
-	ans$residPpm <- 1e6 * ((ans$mz_j - ans$mz_i) - ans$order * step) / ans$mz_i
+	ans$ppm <- 1e6 * ((ans$mz.j - ans$mz.i) - ans$order * step) / ans$mz.i
 	ans
 }
 
@@ -135,22 +132,21 @@ setMethod("findIsotopes", "MSImagingExperiment",
 .decoy_pairs <- function(i, mz, minGap, n)
 {
 	ok <- mz[i] - mz[1L] > minGap | mz[length(mz)] - mz[i] > minGap
-	ans <- lapply(seq_len(n), function(r) {
+	j <- lapply(seq_len(n), function(r) {
 		j <- rep.int(NA_integer_, length(i))
 		todo <- ok
 		while ( any(todo) ) {
 			j[todo] <- sample.int(length(mz), sum(todo), replace=TRUE)
 			todo <- ok & abs(mz[j] - mz[i]) <= minGap
 		}
-		data.frame(rep=rep.int(r, length(i)), i=i, j=j,
-			mz_i=mz[i], mz_j=mz[j])
+		j
 	})
-	do.call(rbind, ans)
+	data.frame(i=rep.int(i, n), j=unlist(j))
 }
 
 # Pearson correlation of pairs (i, j) within each run
 .isotope_cor <- function(object, i, j, minPixels,
-	verbose, chunkopts, BPPARAM, ...)
+	verbose, chunkopts, BPPARAM)
 {
 	run <- droplevels(run(object))
 	means <- rowStats(spectra(object), stat="mean", group=run,
@@ -176,7 +172,7 @@ setMethod("findIsotopes", "MSImagingExperiment",
 	}, CardinalEnv())
 	ans <- chunk_colapply(spectra(object), FUN,
 		run=run, means=means, i=i, j=j, simplify=list,
-		verbose=verbose, chunkopts=chunkopts, BPPARAM=BPPARAM, ...)
+		verbose=verbose, chunkopts=chunkopts, BPPARAM=BPPARAM)
 	ss <- Reduce(`+`, lapply(ans, `[[`, "ss"))
 	sp <- Reduce(`+`, lapply(ans, `[[`, "sp"))
 	# correlations and slopes of j on i
