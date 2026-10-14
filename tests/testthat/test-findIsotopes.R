@@ -30,7 +30,7 @@ simulateIsotopes <- function(mono, height = c(10, 8, 6),
 test_that("findIsotopes", {
 
 	set.seed(1, kind="L'Ecuyer-CMRG")
-	mono <- c(412.2, 518.3, 640.4, 641.9, 777.5, 903.6)
+	mono <- c(1012.2, 1118.3, 1240.4, 1241.9, 1377.5, 1503.6)
 	x <- simulateIsotopes(mono, nrun=2L)
 	fdata <- metadata(x)$design$featureData
 
@@ -47,7 +47,8 @@ test_that("findIsotopes", {
 	expect_true(all(iso$groupSize == 3L))
 	expect_equal(nrow(x[iso$isotopeOrder == 0L,]), length(mono))
 	expect_false(is.unsorted(rev(pairs$q[order(pairs$score)])))
-	expect_true(all(pairs$status %in% c("accepted", "redundant", "fdr")))
+	expect_true(all(pairs$q > 0))
+	expect_true(all(pairs$status %in% c("accepted", "redundant", "ratio", "fdr")))
 	linked <- pairs[pairs$status %in% c("accepted", "redundant"),]
 	best <- vapply(seq_len(nrow(iso)), function(f)
 		max(linked$score[linked$i == f | linked$j == f]), numeric(1L))
@@ -88,7 +89,7 @@ test_that("findIsotopes", {
 test_that("findIsotopes - charge", {
 
 	set.seed(1, kind="L'Ecuyer-CMRG")
-	mono <- c(412.2, 518.3, 640.4, 777.5, 903.6)
+	mono <- c(1012.2, 1118.3, 1240.4, 1377.5, 1503.6)
 	x <- simulateIsotopes(mono, charge=2L)
 	fdata <- metadata(x)$design$featureData
 
@@ -115,33 +116,38 @@ test_that("findIsotopes - order conflict", {
 	x <- simulateImage(pdata, fdata, resolution=5000, by=100,
 		centroided=TRUE)
 
-	iso <- findIsotopes(x, tolerance=30)
+	iso <- findIsotopes(x, tolerance=30, ratioBound=NA)
 	pairs <- metadata(iso)$pairs
 	pc341 <- which(fdata$mol == 6L)
 
 	expect_equal(iso$isotopeOrder, fdata$order)
 	expect_true(any(pairs$j == pc341 & pairs$status == "order_conflict"))
 
+	# PC 34:1 is too intense to be the M+2 of PC 34:2
+	iso2 <- findIsotopes(x, tolerance=30)
+	pairs2 <- metadata(iso2)$pairs
+	expect_true(any(pairs2$j == pc341 & pairs2$status == "ratio"))
+	expect_equal(iso2$isotopeOrder[pc341], 0L)
+
 })
 
 test_that("findIsotopes - tolerance and errors", {
 
 	set.seed(1, kind="L'Ecuyer-CMRG")
-	mono <- c(412.2, 518.3, 640.4, 777.5, 903.6)
+	mono <- c(1012.2, 1118.3, 1240.4, 1377.5, 1503.6)
 	x <- simulateIsotopes(mono)
 
-	metadata(x)$processing <- list(`peak alignment`=
-		list(tolerance=2e-5, units="relative"))
-	iso <- findIsotopes(x)
-	expect_equal(metadata(iso)$params$tolerance, 10)
+	iso <- findIsotopes(x, tolerance=10)
 	expect_equal(metadata(iso)$params$units, "ppm")
 	iso2 <- findIsotopes(x, tolerance=c(mz=0.005))
 	expect_equal(metadata(iso2)$params$units, "mz")
 
-	metadata(x)$processing <- NULL
 	expect_error(findIsotopes(x))
 	expect_error(findIsotopes(x, tolerance=0.6, units="mz"))
 	expect_error(findIsotopes(x, tolerance=10, charge=1.5))
+	expect_error(findIsotopes(x, tolerance=10, maxOrder=7L))
+	expect_error(findIsotopes(x, tolerance=10, ndecoy=0L))
+	expect_error(findIsotopes(x, tolerance=10, ratioBound=0))
 	expect_error(findIsotopes(x, tolerance=10, spacing=0.3)) # no candidates
 	expect_error(findIsotopes(x, tolerance=10, minPixels=1000L))
 

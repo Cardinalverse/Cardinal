@@ -12,9 +12,10 @@
 }
 
 \usage{
-\S4method{findIsotopes}{MSImagingExperiment}(object, tolerance = NA, units = c("ppm", "mz"),
+\S4method{findIsotopes}{MSImagingExperiment}(object, tolerance, units = c("ppm", "mz"),
     charge = 1L, spacing = 1.0033548, maxOrder = 3L, maxGroupOrder = 6L,
-    fdr = 0.05, ndecoy = 20L, runAgg = c("median", "min", "mean"),
+    ratioBound = 2, fdr = 0.05, ndecoy = 100L,
+    runAgg = c("median", "min", "mean"),
     minRuns = 1L, minPixels = 20L,
     verbose = getCardinalVerbose(), chunkopts = list(),
     BPPARAM = getCardinalBPPARAM(), \dots)
@@ -23,7 +24,7 @@
 \arguments{
     \item{object}{A centroided (peak-picked) imaging experiment.}
 
-    \item{tolerance}{The tolerance for matching the m/z spacing of an isotope pair. If \code{NA}, then half the tolerance used by \code{\link{peakAlign}} is used.}
+    \item{tolerance}{The tolerance for matching the m/z spacing of an isotope pair. This should be close to the mass accuracy of the data (see Details).}
 
     \item{units}{The units for the above tolerance.}
 
@@ -35,9 +36,11 @@
 
     \item{maxGroupOrder}{The largest isotope order allowed in a group.}
 
+    \item{ratioBound}{Pairs whose intensity ratio is more than \code{ratioBound} times the largest ratio possible for 13C isotopes are rejected. Use \code{NA} to keep them (e.g., for ions with chlorine or bromine).}
+
     \item{fdr}{The FDR threshold (q-value) for accepting an isotope pair.}
 
-    \item{ndecoy}{The number of times decoy pairs are sampled.}
+    \item{ndecoy}{The number of times decoy pairs are sampled. More decoys make the results depend less on the random seed.}
 
     \item{runAgg}{The function used to summarize the image similarity of a pair across runs.}
 
@@ -57,13 +60,15 @@
 \details{
     First, candidate isotope pairs are found by matching features that are k * \code{spacing / charge} apart (for k = 1, ..., \code{maxOrder}) within the \code{tolerance}. Each pair is scored by the Pearson correlation of its ion images, calculated separately within each run and then summarized by \code{runAgg}.
 
-    The FDR is estimated using decoys in a target-decoy approach inspired by METASPACE (Palmer et al., 2017). The lighter feature of each candidate pair is paired with a randomly selected feature far enough away that it can't be an isotope, and this is repeated \code{ndecoy} times. The FDR at a score is the median number of decoys with that score or higher divided by the number of candidate pairs with that score or higher. Each pair is assigned a q-value (Käll et al., 2008), and pairs with q-values less than or equal to \code{fdr} are accepted. If no pairs are accepted, a warning is given and each feature is assigned to its own group.
+    The FDR is estimated using decoys in a target-decoy approach inspired by METASPACE (Palmer et al., 2017). The lighter feature of each candidate pair is paired with a randomly selected feature far enough away that it can't be an isotope, and this is repeated \code{ndecoy} times. As in METASPACE, the decoys from all repetitions are pooled. The FDR at a score is the number of decoys with that score or higher, plus one, divided by \code{ndecoy} and by the number of candidate pairs with that score or higher. Adding one avoids estimating an FDR of zero when few pairs are accepted. Each pair is assigned a q-value (Käll et al., 2008), and pairs with q-values less than or equal to \code{fdr} are accepted. If no pairs are accepted, a warning is given and each feature is assigned to its own group.
 
-    Accepted pairs are merged into groups in order of decreasing score. A merge is refused if it would put two features at the same isotope order or extend a group beyond \code{maxGroupOrder}. This prevents a single false pair from joining two envelopes.
+    The intensity ratio of a pair is the slope of the heavier feature's intensities regressed on the lighter feature's intensities, calculated within each run and summarized by the median. Unlike a ratio of mean intensities, this is not affected by background. A 13C isotope can't be more intense than it would be for a molecule made only of carbon, so the ratio of an M+k pair is limited to about lambda^k / k!, where lambda = 0.0107 * floor(charge * mz / 12). Accepted pairs with ratios more than \code{ratioBound} times this limit are rejected. This often rejects a co-localized species that overlaps an isotope peak, but ions with chlorine, bromine, or many sulfur atoms can exceed it. The limit assumes the default 13C \code{spacing}, so use \code{ratioBound = NA} with a different \code{spacing}.
+
+    Accepted pairs are merged into groups in order of decreasing score. Isotope orders are summed along the merged pairs. A merge is refused if it would put two features at the same isotope order or extend a group beyond \code{maxGroupOrder}. This prevents a single false pair from joining two envelopes.
 
     Isotope order 0 is the lightest observed feature in a group, which is not necessarily the monoisotopic peak if that peak was not detected. Keeping the features with order 0 keeps one feature per group.
 
-    Co-localized species with nearly the same m/z as an isotope can be mistaken for it. For example, two 13C atoms and two hydrogens (one double bond) differ by 0.0089 Da, which is within a 10 ppm tolerance above m/z 894. A tolerance close to the mass accuracy of the data reduces this. Weak isotopes with many zero intensities have lower correlations and may be missed. The FDR is controlled for pairs, not groups.
+    Co-localized species with nearly the same m/z as an isotope can be mistaken for it. For example, two 13C atoms and two hydrogens (one double bond) differ by 0.0089 Da, which is within a 10 ppm tolerance above m/z 894. A tolerance close to the mass accuracy of the data reduces this. The m/z errors of the candidate pairs are given by \code{residPpm} in \code{metadata(object)$pairs}, and the accepted pairs can be used to check the tolerance. Weak isotopes with many zero intensities have lower correlations and may be missed. The FDR is controlled for pairs, not groups.
 }
 
 \value{
@@ -81,7 +86,7 @@
         \item \code{linkScore}, \code{linkQ}: The score and q-value of the best accepted pair involving the feature (or \code{NA} for single features).
     }
 
-    The \code{metadata()} contains the candidate pairs and their status (\code{pairs}), the decoy pairs (\code{decoys}), the scores of the candidate pairs in each run (\code{runScores}), and the parameters (\code{params}).
+    The \code{metadata()} contains the candidate pairs with their scores, q-values, intensity ratios (\code{ratio}), ratio limits (\code{ratioMax}), and status (\code{pairs}), the decoy pairs (\code{decoys}), the scores of the candidate pairs in each run (\code{runScores}), and the parameters (\code{params}). The status of a pair is one of \code{"accepted"} (used to merge groups), \code{"redundant"} (both features were already in the same group), \code{"order_conflict"} or \code{"span"} (the merge was refused), \code{"ratio"} (the intensity ratio was too high), \code{"fdr"} (the q-value was greater than \code{fdr}), or \code{"not_evaluable"} (the pair could not be scored).
 }
 
 \references{
@@ -102,7 +107,7 @@
 \examples{
 set.seed(1, kind="L'Ecuyer-CMRG")
 pdata <- PositionDataFrame(coord=expand.grid(x=1:16, y=1:16))
-mono <- c(412.2, 640.4, 903.6)
+mono <- c(1012.2, 1240.4, 1503.6)
 fdata <- MassDataFrame(mz=as.vector(outer(0:2 * 1.0033548, mono, "+")))
 
 # simulate isotope envelopes (M+0, M+1, M+2) sharing an image
