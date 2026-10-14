@@ -3,9 +3,10 @@
 ## --------------------
 
 setMethod("findIsotopes", "MSImagingExperiment",
-	function(object, tolerance = NA, units = c("ppm", "mz"),
+	function(object, tolerance, units = c("ppm", "mz"),
 		charge = 1L, spacing = 1.0033548, maxOrder = 3L, maxGroupOrder = 6L,
-		fdr = 0.05, ndecoy = 20L, runAgg = c("median", "min", "mean"),
+		ratioBound = 2, fdr = 0.05, ndecoy = 100L,
+		runAgg = c("median", "min", "mean"),
 		minRuns = 1L, minPixels = 20L,
 		verbose = getCardinalVerbose(), chunkopts = list(),
 		BPPARAM = getCardinalBPPARAM(), ...)
@@ -20,25 +21,17 @@ setMethod("findIsotopes", "MSImagingExperiment",
 		.Warn("queued processing steps will be ignored")
 	if ( charge < 1 || charge %% 1 != 0 )
 		.Error("'charge' must be a positive integer")
+	if ( maxOrder < 1 || maxGroupOrder < maxOrder )
+		.Error("'maxOrder' must be at least 1 and at most 'maxGroupOrder'")
+	if ( !is.na(ratioBound) && ratioBound <= 0 )
+		.Error("'ratioBound' must be positive or NA")
 	if ( fdr <= 0 || fdr >= 1 )
 		.Error("'fdr' must be between 0 and 1")
+	if ( ndecoy < 1 )
+		.Error("'ndecoy' must be at least 1")
 	mz <- mz(object)
 	if ( length(mz) < 2L || is.unsorted(mz, strictly=TRUE) )
 		.Error("m/z values must be unique and sorted")
-	if ( is.na(tolerance) ) {
-		# estimate tolerance as half the peak alignment tolerance
-		aligned <- .peak_alignment(object)
-		if ( is.null(aligned) )
-			.Error("can't estimate tolerance without peak alignment; ",
-				"please specify 'tolerance'")
-		units <- switch(aligned$units,
-			relative=, ppm="ppm", absolute=, mz="mz")
-		tolerance <- switch(units,
-			ppm=0.5 * 1e6 * aligned$tolerance,
-			mz=0.5 * aligned$tolerance)
-		.Log("estimated ", units, " tolerance of ", tolerance,
-			" from peak alignment", message=verbose)
-	}
 	step <- spacing / charge
 	tol <- switch(units,
 		ppm=1e-6 * tolerance * mz,
@@ -56,7 +49,7 @@ setMethod("findIsotopes", "MSImagingExperiment",
 	if ( nrow(targets) == 0L )
 		.Error("no candidate isotope pairs; ",
 			"check 'tolerance', 'units', and 'charge'")
-	minGap <- maxOrder * step + 2 * max(tol)
+	minGap <- maxGroupOrder * step + 2 * max(tol)
 	decoys <- .decoy_pairs(targets$i, mz, minGap, ndecoy)
 	.Log("scoring ", nrow(targets), " candidate isotope pairs ",
 		"and ", nrow(decoys), " decoy pairs", message=verbose)
@@ -64,8 +57,9 @@ setMethod("findIsotopes", "MSImagingExperiment",
 	nt <- nrow(targets)
 	i <- c(targets$i, decoys$i)
 	j <- c(targets$j, decoys$j)
-	runScores <- .isotope_cor(object, i, j, minPixels,
+	cors <- .isotope_cor(object, i, j, minPixels,
 		verbose=verbose, chunkopts=chunkopts, BPPARAM=BPPARAM, ...)
+	runScores <- cors$scores
 	nRuns <- rowSums(!is.na(runScores))
 	score <- rep.int(NA_real_, length(i))
 	ok <- nRuns >= max(1L, minRuns)
@@ -75,14 +69,26 @@ setMethod("findIsotopes", "MSImagingExperiment",
 	targets$nRuns <- nRuns[seq_len(nt)]
 	decoys$score <- score[-seq_len(nt)]
 	decoys$nRuns <- nRuns[-seq_len(nt)]
+	# intensity ratios and their all-carbon upper bound (13C only)
+	lambda <- 0.0107 * floor(charge * targets$mz_i / 12)
+	targets$ratio <- apply(cors$slopes[seq_len(nt),,drop=FALSE], 1L,
+		median, na.rm=TRUE)
+	targets$ratioMax <- lambda^targets$order / factorial(targets$order)
 	# estimate q-values and group isotopes
-	targets$q <- .isotope_qvalues(targets$score, decoys$score, decoys$rep)
+	targets$q <- .isotope_qvalues(targets$score, decoys$score)
 	pass <- !is.na(targets$q) & targets$q <= fdr
+	targets$status <- ifelse(is.na(targets$score), "not_evaluable", "fdr")
+	if ( !is.na(ratioBound) ) {
+		high <- pass & !is.na(targets$ratio) &
+			targets$ratio > ratioBound * targets$ratioMax
+		targets$status[high] <- "ratio"
+		pass <- pass & !high
+	}
 	if ( !any(pass) )
 		.Warn("no isotope pairs pass fdr = ", fdr)
-	targets$status <- ifelse(is.na(targets$score), "not_evaluable", "fdr")
-	groups <- .merge_isotopes(mz, targets$i[pass], targets$j[pass],
-		targets$score[pass], targets$residPpm[pass], step, maxGroupOrder)
+	groups <- .merge_isotopes(length(mz), targets$i[pass], targets$j[pass],
+		targets$order[pass], targets$score[pass], targets$residPpm[pass],
+		maxGroupOrder)
 	targets$status[pass] <- groups$status
 	.Log("found ", sum(groups$status == "accepted"), " isotope links ",
 		"at fdr = ", fdr, message=verbose)
@@ -90,7 +96,7 @@ setMethod("findIsotopes", "MSImagingExperiment",
 	group <- as.integer(factor(groups$root))
 	ans <- MassDataFrame(mz=mz,
 		isotopeGroup=group,
-		isotopeOrder=as.integer(round((mz - mz[groups$root]) / step)),
+		isotopeOrder=groups$order,
 		groupSize=tabulate(group)[group],
 		linkScore=NA_real_, linkQ=NA_real_)
 	linked <- targets[targets$status %in% c("accepted", "redundant"),,drop=FALSE]
@@ -101,24 +107,12 @@ setMethod("findIsotopes", "MSImagingExperiment",
 	ans$linkQ[k[best]] <- rep(linked$q, each=2L)[best]
 	params <- list(tolerance=tolerance, units=units, charge=charge,
 		spacing=spacing, maxOrder=maxOrder, maxGroupOrder=maxGroupOrder,
-		fdr=fdr, ndecoy=ndecoy, minGap=minGap, runAgg=runAgg,
-		minRuns=minRuns, minPixels=minPixels)
+		ratioBound=ratioBound, fdr=fdr, ndecoy=ndecoy, minGap=minGap,
+		runAgg=runAgg, minRuns=minRuns, minPixels=minPixels)
 	metadata(ans) <- list(pairs=targets, decoys=decoys,
 		runScores=runScores[seq_len(nt),,drop=FALSE], params=params)
 	ans
 })
-
-# get the most recent peak alignment parameters
-.peak_alignment <- function(object)
-{
-	steps <- Filter(function(ps) is.list(ps) &&
-		"peak alignment" %in% names(ps), metadata(object))
-	if ( length(steps) ) {
-		steps[[length(steps)]][["peak alignment"]]
-	} else {
-		NULL
-	}
-}
 
 # find candidate pairs (i, j) with mz[j] ~ mz[i] + k * step
 .isotope_pairs <- function(mz, tol, step, orders)
@@ -185,27 +179,29 @@ setMethod("findIsotopes", "MSImagingExperiment",
 		verbose=verbose, chunkopts=chunkopts, BPPARAM=BPPARAM, ...)
 	ss <- Reduce(`+`, lapply(ans, `[[`, "ss"))
 	sp <- Reduce(`+`, lapply(ans, `[[`, "sp"))
-	ans <- sp / sqrt(ss[i,,drop=FALSE] * ss[j,,drop=FALSE])
-	ans[!is.finite(ans)] <- NA_real_
+	# correlations and slopes of j on i
+	cors <- sp / sqrt(ss[i,,drop=FALSE] * ss[j,,drop=FALSE])
+	slopes <- sp / ss[i,,drop=FALSE]
+	cors[!is.finite(cors)] <- NA_real_
+	slopes[!is.finite(cors)] <- NA_real_
 	npixels <- table(run)
-	dimnames(ans) <- list(NULL, levels(run))
-	ans[,npixels >= minPixels,drop=FALSE]
+	dimnames(cors) <- dimnames(slopes) <- list(NULL, levels(run))
+	list(scores=cors[,npixels >= minPixels,drop=FALSE],
+		slopes=slopes[,npixels >= minPixels,drop=FALSE])
 }
 
-# target-decoy q-values (median decoy counts over repetitions)
-.isotope_qvalues <- function(target, decoy, rep)
+# target-decoy q-values (decoys pooled over repetitions)
+.isotope_qvalues <- function(target, decoy)
 {
 	q <- rep.int(NA_real_, length(target))
 	s <- target[!is.na(target)]
-	if ( length(s) == 0L )
+	d <- sort(decoy[!is.na(decoy)])
+	if ( length(s) == 0L || length(d) == 0L )
 		return(q)
 	ntarget <- length(s) - findInterval(s, sort(s), left.open=TRUE)
-	ndecoy <- vapply(split(decoy, rep), function(d) {
-		# scale to the number of scored targets
-		d <- sort(d)
-		(length(d) - findInterval(s, d, left.open=TRUE)) * length(s) / length(d)
-	}, numeric(length(s)))
-	ndecoy <- apply(matrix(ndecoy, nrow=length(s)), 1L, median, na.rm=TRUE)
+	# add one decoy and scale to the number of scored targets
+	ndecoy <- (length(d) - findInterval(s, d, left.open=TRUE) + 1) *
+		length(s) / length(d)
 	o <- order(s, decreasing=TRUE)
 	qs <- numeric(length(s))
 	qs[o] <- rev(cummin(rev((ndecoy / ntarget)[o])))
@@ -214,10 +210,12 @@ setMethod("findIsotopes", "MSImagingExperiment",
 }
 
 # merge pairs into groups (strongest first) without order conflicts
-.merge_isotopes <- function(mz, i, j, score, resid, step, maxGroupOrder)
+.merge_isotopes <- function(n, i, j, order, score, resid, maxGroupOrder)
 {
-	parent <- seq_along(mz)
+	parent <- seq_len(n)
 	members <- as.list(parent)
+	# isotope orders summed along links
+	k <- integer(n)
 	root <- function(a) {
 		while ( parent[a] != a )
 			a <- parent[a]
@@ -228,21 +226,27 @@ setMethod("findIsotopes", "MSImagingExperiment",
 		a <- root(i[e])
 		b <- root(j[e])
 		if ( a == b ) {
-			status[e] <- "redundant"
+			# a loop must have consistent orders
+			status[e] <- if ( k[j[e]] - k[i[e]] == order[e] )
+				"redundant" else "order_conflict"
 			next
 		}
 		m <- c(members[[a]], members[[b]])
-		k <- round((mz[m] - min(mz[m])) / step)
-		if ( anyDuplicated(k) ) {
+		km <- c(k[members[[a]]],
+			k[members[[b]]] + k[i[e]] + order[e] - k[j[e]])
+		km <- km - min(km)
+		if ( anyDuplicated(km) ) {
 			status[e] <- "order_conflict"
-		} else if ( max(k) > maxGroupOrder ) {
+		} else if ( max(km) > maxGroupOrder ) {
 			status[e] <- "span"
 		} else {
 			parent[max(a, b)] <- min(a, b)
 			members[[min(a, b)]] <- m
+			k[m] <- km
 			status[e] <- "accepted"
 		}
 	}
-	list(root=vapply(seq_along(mz), root, integer(1L)), status=status)
+	list(root=vapply(seq_len(n), root, integer(1L)),
+		order=as.integer(k), status=status)
 }
 
