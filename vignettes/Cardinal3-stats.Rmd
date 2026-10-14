@@ -146,30 +146,30 @@ We simulate a dataset with 5 molecules, each with 3 isotope peaks (M+0, M+1, M+2
 ```{r isotopes-data}
 set.seed(2020, kind="L'Ecuyer-CMRG")
 pdata <- PositionDataFrame(coord=expand.grid(x=1:24, y=1:24))
-mono <- c(412.2, 518.3, 640.4, 777.5, 903.6)
+mono <- c(1012.2, 1118.3, 1240.4, 1377.5, 1503.6)
 fdata <- MassDataFrame(mz=as.vector(outer(0:2 * 1.0033548, mono, "+")))
 for ( k in seq_along(mono) ) {
 	nm <- paste0("m", k)
 	pdata <- addShape(pdata, center=runif(2, 6, 19), size=5, name=nm)
-	fdata[[nm]] <- ifelse(rep(seq_along(mono), each=3) == k, c(10, 6, 3), 0)
+	fdata[[nm]] <- ifelse(rep(seq_along(mono), each=3) == k, c(10, 8, 6), 0)
 }
 mse_iso <- simulateImage(pdata, fdata, resolution=5000, by=100,
 	centroided=TRUE)
 ```
 
-Use `findIsotopes()` to group the features into isotope envelopes. Candidate pairs are matched by their *m/z* spacing and scored by the correlation of their images within each run. The false discovery rate (FDR) is controlled using decoy pairs of features that are too far apart to be isotopes.
+Use `groupIsotopes()` to group the features into isotope envelopes. Candidate pairs are matched by their *m/z* spacing and scored by the correlation of their images within each run. The false discovery rate (FDR) is controlled using decoy pairs of features that are too far apart to be isotopes.
 
-If `tolerance` is not specified, then half of the tolerance used by `peakAlign()` is used.
+The `tolerance` should be close to the mass accuracy of the data. It is not the same as the (wider) tolerance used by `peakAlign()`.
 
 ```{r isotopes}
-iso <- findIsotopes(mse_iso, tolerance=10)
+iso <- groupIsotopes(mse_iso, tolerance=10)
 iso
 ```
 
 The result has one row for each feature, in the same order. Isotope order 0 is the lightest feature in each group, so we keep those to keep one feature per molecule.
 
 ```{r isotopes-subset}
-mse_iso[iso$isotopeOrder == 0L,]
+mse_iso[iso$isotope == 0L,]
 ```
 
 The scores of the candidate pairs and the decoys are stored in the `metadata()` and can be compared to check the separation.

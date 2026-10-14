@@ -1,4 +1,11 @@
 
+# Cardinal 3.15.1 (2026-10-14)
+
+## New features
+
+* Added 'groupIsotopes()' for grouping isotope peaks by m/z spacing
+        and image correlation, with target-decoy FDR control
+
 # Cardinal 3.13.4 (2026-04-24)
 
 ## Major changes

@@ -1,7 +1,7 @@
 require(testthat)
 require(Cardinal)
 
-context("findIsotopes")
+context("groupIsotopes")
 
 # simulate isotope envelopes (M+0, M+1, M+2) sharing an image
 simulateIsotopes <- function(mono, height = c(10, 8, 6),
@@ -27,32 +27,34 @@ simulateIsotopes <- function(mono, height = c(10, 8, 6),
 		centroided=TRUE, ...)
 }
 
-test_that("findIsotopes", {
+test_that("groupIsotopes", {
 
 	set.seed(1, kind="L'Ecuyer-CMRG")
 	mono <- c(1012.2, 1118.3, 1240.4, 1241.9, 1377.5, 1503.6)
 	x <- simulateIsotopes(mono, nrun=2L)
 	fdata <- metadata(x)$design$featureData
 
-	iso <- findIsotopes(x, tolerance=10)
+	iso <- groupIsotopes(x, tolerance=10)
 	pairs <- metadata(iso)$pairs
 
-	expect_is(iso, "MassDataFrame")
+	expect_is(iso, "DataFrame")
 	expect_equal(nrow(iso), nrow(x))
-	expect_equal(mz(iso), mz(x))
+	expect_equal(iso$i, seq_len(nrow(x)))
+	expect_equal(iso$mz, mz(x))
 	expect_setequal(names(metadata(iso)),
 		c("pairs", "decoys", "runScores", "params"))
-	expect_equal(iso$isotopeOrder, fdata$order)
-	expect_equal(iso$isotopeGroup, as.integer(factor(fdata$mol, unique(fdata$mol))))
-	expect_true(all(iso$groupSize == 3L))
-	expect_equal(nrow(x[iso$isotopeOrder == 0L,]), length(mono))
-	expect_false(is.unsorted(rev(pairs$q[order(pairs$score)])))
-	expect_true(all(pairs$q > 0))
-	expect_true(all(pairs$status %in% c("accepted", "redundant", "ratio", "fdr")))
+	expect_equal(iso$isotope, fdata$order)
+	expect_equal(iso$group, match(fdata$mol, unique(fdata$mol)))
+	expect_true(all(iso$size == 3L))
+	expect_equal(nrow(x[iso$isotope == 0L,]), length(mono))
+	expect_false(is.unsorted(rev(pairs$fdr[order(pairs$score)])))
+	expect_true(all(pairs$fdr > 0))
+	expect_true(all(pairs$status %in%
+		c("accepted", "redundant", "ratio", "fdr")))
 	linked <- pairs[pairs$status %in% c("accepted", "redundant"),]
 	best <- vapply(seq_len(nrow(iso)), function(f)
 		max(linked$score[linked$i == f | linked$j == f]), numeric(1L))
-	expect_equal(iso$linkScore, best)
+	expect_equal(iso$score, best)
 
 	# per-run scores match Pearson correlation
 	p <- pairs[1L,]
@@ -63,9 +65,9 @@ test_that("findIsotopes", {
 
 	# scores are the same for different chunks
 	set.seed(1, kind="L'Ecuyer-CMRG")
-	iso1 <- findIsotopes(x, tolerance=10, chunkopts=list(nchunks=1L))
+	iso1 <- groupIsotopes(x, tolerance=10, chunkopts=list(nchunks=1L))
 	set.seed(1, kind="L'Ecuyer-CMRG")
-	iso2 <- findIsotopes(x, tolerance=10, chunkopts=list(nchunks=7L))
+	iso2 <- groupIsotopes(x, tolerance=10, chunkopts=list(nchunks=7L))
 	expect_equal(metadata(iso1)$decoys, metadata(iso2)$decoys)
 	expect_equal(iso1, iso2)
 
@@ -73,35 +75,54 @@ test_that("findIsotopes", {
 	xs <- x
 	spectra(xs) <- matter::sparse_mat(as.matrix(spectra(x)))
 	set.seed(1, kind="L'Ecuyer-CMRG")
-	iso3 <- findIsotopes(xs, tolerance=10, chunkopts=list(nchunks=7L))
+	iso3 <- groupIsotopes(xs, tolerance=10, chunkopts=list(nchunks=7L))
 	expect_equal(iso1, iso3)
 
 	# features missing from runs
-	iso4 <- findIsotopes(x[,run(x) == "run1"], tolerance=10)
+	iso4 <- groupIsotopes(x[,run(x) == "run1"], tolerance=10)
 	expect_equal(colnames(metadata(iso4)$runScores), "run1")
-	expect_true(all(metadata(iso4)$pairs$nRuns <= 1L))
-	expect_warning(iso5 <- findIsotopes(x, tolerance=10, minRuns=3L))
+	expect_true(all(metadata(iso4)$pairs$nruns <= 1L))
+	expect_warning(iso5 <- groupIsotopes(x, tolerance=10, minRuns=3L))
 	expect_true(all(metadata(iso5)$pairs$status == "not_evaluable"))
-	expect_true(all(iso5$isotopeOrder == 0L))
+	expect_true(all(iso5$isotope == 0L))
+
+	# a group can't exceed maxGroupOrder
+	iso6 <- groupIsotopes(x, tolerance=10, maxOrder=1L, maxGroupOrder=1L)
+	expect_true(any(metadata(iso6)$pairs$status == "span"))
+	expect_true(all(iso6$size <= 2L))
+
+	# unknown centroiding and extra arguments
+	y <- x
+	centroided(y) <- NA
+	expect_no_error(groupIsotopes(y, tolerance=10))
+	expect_no_error(groupIsotopes(x, tolerance=10, nchunks=4L))
+
+	# q-values match a direct calculation
+	s <- c(0.95, 0.9, 0.85, 0.8, 0.3, 0.2)
+	d <- c(0.82, 0.25, rep(0.1, 10))
+	q <- Cardinal:::.isotope_qvalues(s, d)
+	# fdr = (decoys >= s + 1) * (6 / 12) / (targets >= s)
+	fdr <- c(1/1, 1/2, 1/3, 2/4, 2/5, 3/6) * 0.5
+	expect_equal(q, rev(cummin(rev(fdr))))
 
 })
 
-test_that("findIsotopes - charge", {
+test_that("groupIsotopes - charge", {
 
 	set.seed(1, kind="L'Ecuyer-CMRG")
 	mono <- c(1012.2, 1118.3, 1240.4, 1377.5, 1503.6)
 	x <- simulateIsotopes(mono, charge=2L)
 	fdata <- metadata(x)$design$featureData
 
-	iso <- findIsotopes(x, tolerance=10, charge=2L)
-	expect_equal(iso$isotopeOrder, fdata$order)
+	iso <- groupIsotopes(x, tolerance=10, charge=2L)
+	expect_equal(iso$isotope, fdata$order)
 
-	iso2 <- suppressWarnings(findIsotopes(x, tolerance=10, charge=1L))
-	expect_true(all(iso2$groupSize < 3L))
+	iso2 <- suppressWarnings(groupIsotopes(x, tolerance=10, charge=1L))
+	expect_true(all(iso2$size < 3L))
 
 })
 
-test_that("findIsotopes - order conflict", {
+test_that("groupIsotopes - order conflict", {
 
 	set.seed(1, kind="L'Ecuyer-CMRG")
 	# PC 34:2 [M+H]+ envelope with PC 34:1 [M+H]+ near its M+2
@@ -116,50 +137,53 @@ test_that("findIsotopes - order conflict", {
 	x <- simulateImage(pdata, fdata, resolution=5000, by=100,
 		centroided=TRUE)
 
-	iso <- findIsotopes(x, tolerance=30, ratioBound=NA)
+	iso <- groupIsotopes(x, tolerance=30, ratioBound=NA)
 	pairs <- metadata(iso)$pairs
 	pc341 <- which(fdata$mol == 6L)
 
-	expect_equal(iso$isotopeOrder, fdata$order)
+	expect_equal(iso$isotope, fdata$order)
 	expect_true(any(pairs$j == pc341 & pairs$status == "order_conflict"))
 
 	# PC 34:1 is too intense to be the M+2 of PC 34:2
-	iso2 <- findIsotopes(x, tolerance=30)
+	iso2 <- groupIsotopes(x, tolerance=30)
 	pairs2 <- metadata(iso2)$pairs
 	expect_true(any(pairs2$j == pc341 & pairs2$status == "ratio"))
-	expect_equal(iso2$isotopeOrder[pc341], 0L)
+	expect_equal(iso2$isotope[pc341], 0L)
 
 })
 
-test_that("findIsotopes - tolerance and errors", {
+test_that("groupIsotopes - tolerance and errors", {
 
 	set.seed(1, kind="L'Ecuyer-CMRG")
 	mono <- c(1012.2, 1118.3, 1240.4, 1377.5, 1503.6)
 	x <- simulateIsotopes(mono)
 
-	iso <- findIsotopes(x, tolerance=10)
+	iso <- groupIsotopes(x, tolerance=10)
 	expect_equal(metadata(iso)$params$units, "ppm")
-	iso2 <- findIsotopes(x, tolerance=c(mz=0.005))
+	iso2 <- groupIsotopes(x, tolerance=c(mz=0.005))
 	expect_equal(metadata(iso2)$params$units, "mz")
 
-	expect_error(findIsotopes(x))
-	expect_error(findIsotopes(x, tolerance=0.6, units="mz"))
-	expect_error(findIsotopes(x, tolerance=10, charge=1.5))
-	expect_error(findIsotopes(x, tolerance=10, maxOrder=7L))
-	expect_error(findIsotopes(x, tolerance=10, ndecoy=0L))
-	expect_error(findIsotopes(x, tolerance=10, ratioBound=0))
-	expect_error(findIsotopes(x, tolerance=10, spacing=0.3)) # no candidates
-	expect_error(findIsotopes(x, tolerance=10, minPixels=1000L))
+	expect_error(groupIsotopes(x))
+	expect_error(groupIsotopes(x, tolerance=0.6, units="mz"))
+	expect_error(groupIsotopes(x, tolerance=10, charge=1.5))
+	expect_error(groupIsotopes(x, tolerance=10, maxOrder=7L))
+	expect_error(groupIsotopes(x, tolerance=10, ndecoy=0L))
+	expect_error(groupIsotopes(x, tolerance=10, ratioBound=0))
+	expect_error(groupIsotopes(x, tolerance=c(5, 10)))
+	expect_error(groupIsotopes(x, tolerance=NA))
+	expect_error(groupIsotopes(x, tolerance=10, fdr=NA))
+	expect_error(groupIsotopes(x, tolerance=10, charge=5L)) # no candidates
+	expect_error(groupIsotopes(x, tolerance=10, minPixels=1000L))
 
 	# nothing passes when isotopes are not colocalized
 	y <- x
 	k <- metadata(x)$design$featureData$order > 0L
 	spectra(y)[k,] <- t(apply(spectra(y)[k,], 1L, sample))
-	expect_warning(iso3 <- findIsotopes(y, tolerance=10))
-	expect_true(all(iso3$isotopeOrder == 0L))
+	expect_warning(iso3 <- groupIsotopes(y, tolerance=10))
+	expect_true(all(iso3$isotope == 0L))
 	expect_true(all(metadata(iso3)$pairs$status == "fdr"))
 
 	centroided(x) <- FALSE
-	expect_error(findIsotopes(x, tolerance=10))
+	expect_error(groupIsotopes(x, tolerance=10))
 
 })
