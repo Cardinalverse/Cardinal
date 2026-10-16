@@ -4,7 +4,7 @@
 ## New features
 
 * Added 'groupIsotopes()' for grouping isotope peaks by m/z spacing
-        and image correlation, with target-decoy FDR control
+        and image correlation, with a target-decoy score cutoff
 
 # Cardinal 3.13.4 (2026-04-24)
 

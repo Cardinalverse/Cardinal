@@ -157,7 +157,7 @@ mse_iso <- simulateImage(pdata, fdata, resolution=5000, by=100,
 	centroided=TRUE)
 ```
 
-Use `groupIsotopes()` to group the features into isotope envelopes. Candidate pairs are matched by their *m/z* spacing and scored by the correlation of their images within each run. The false discovery rate (FDR) is controlled using decoy pairs of features that are too far apart to be isotopes.
+Use `groupIsotopes()` to group the features into isotope envelopes. Candidate pairs are matched by their *m/z* spacing and scored by the correlation of their images within each run. Decoy pairs of features that are too far apart to be isotopes are used to choose a score cutoff.
 
 The `tolerance` should be close to the mass accuracy of the data. It is not the same as the (wider) tolerance used by `peakAlign()`.
 
