@@ -5,7 +5,7 @@
 setMethod("groupIsotopes", "MSImagingExperiment",
 	function(object, tolerance, units = c("ppm", "mz"),
 		charge = 1L, maxOrder = 3L, maxGroupOrder = 6L,
-		ratioBound = 2, fdr = 0.05, ndecoy = 100L,
+		ratioBound = 2, decoyRate = 0.05, ndecoy = 100L,
 		minRuns = 1L, minPixels = 20L,
 		verbose = getCardinalVerbose(), chunkopts = list(),
 		BPPARAM = getCardinalBPPARAM(), ...)
@@ -25,8 +25,8 @@ setMethod("groupIsotopes", "MSImagingExperiment",
 		.Error("'maxOrder' must be at least 1 and at most 'maxGroupOrder'")
 	if ( !is.na(ratioBound) && ratioBound <= 0 )
 		.Error("'ratioBound' must be positive or NA")
-	if ( !isTRUE(fdr > 0 && fdr < 1) )
-		.Error("'fdr' must be between 0 and 1")
+	if ( !isTRUE(decoyRate > 0 && decoyRate < 1) )
+		.Error("'decoyRate' must be between 0 and 1")
 	if ( ndecoy < 1 )
 		.Error("'ndecoy' must be at least 1")
 	mz <- mz(object)
@@ -72,10 +72,10 @@ setMethod("groupIsotopes", "MSImagingExperiment",
 	targets$ratio <- apply(cors$slopes[seq_len(nt),,drop=FALSE], 1L,
 		median, na.rm=TRUE)
 	targets$bound <- lambda^targets$order / factorial(targets$order)
-	# estimate q-values and group isotopes
-	targets$fdr <- .isotope_qvalues(targets$score, decoys$score)
-	pass <- !is.na(targets$fdr) & targets$fdr <= fdr
-	targets$status <- ifelse(is.na(targets$score), "not_evaluable", "fdr")
+	# estimate decoy rates and group isotopes
+	targets$decoyRate <- .decoy_rates(targets$score, decoys$score)
+	pass <- !is.na(targets$decoyRate) & targets$decoyRate <= decoyRate
+	targets$status <- ifelse(is.na(targets$score), "not_evaluable", "decoy_rate")
 	if ( !is.na(ratioBound) ) {
 		high <- pass & !is.na(targets$ratio) &
 			targets$ratio > ratioBound * targets$bound
@@ -83,28 +83,28 @@ setMethod("groupIsotopes", "MSImagingExperiment",
 		pass <- pass & !high
 	}
 	if ( !any(pass) )
-		.Warn("no isotope pairs pass fdr = ", fdr)
+		.Warn("no isotope pairs pass decoyRate = ", decoyRate)
 	groups <- .merge_isotopes(length(mz), targets$i[pass], targets$j[pass],
 		targets$order[pass], targets$score[pass], targets$ppm[pass],
 		maxGroupOrder)
 	targets$status[pass] <- groups$status
 	.Log("found ", sum(groups$status == "accepted"), " isotope links ",
-		"at fdr = ", fdr, message=verbose)
+		"at decoyRate = ", decoyRate, message=verbose)
 	# build results
 	group <- as.integer(factor(groups$root))
 	scores <- data.frame(group=group, isotope=groups$order,
-		size=tabulate(group)[group], score=NA_real_, fdr=NA_real_)
+		size=tabulate(group)[group], score=NA_real_, decoyRate=NA_real_)
 	linked <- targets$status %in% c("accepted", "redundant")
 	linked <- targets[linked,,drop=FALSE]
 	linked <- linked[order(linked$score, decreasing=TRUE),,drop=FALSE]
 	k <- as.vector(rbind(linked$i, linked$j))
 	best <- !duplicated(k)
 	scores$score[k[best]] <- rep(linked$score, each=2L)[best]
-	scores$fdr[k[best]] <- rep(linked$fdr, each=2L)[best]
+	scores$decoyRate[k[best]] <- rep(linked$decoyRate, each=2L)[best]
 	ans <- .rank_featureData(object, scores, "none")
 	params <- list(tolerance=tolerance, units=units, charge=charge,
 		maxOrder=maxOrder, maxGroupOrder=maxGroupOrder,
-		ratioBound=ratioBound, fdr=fdr, ndecoy=ndecoy, minGap=minGap,
+		ratioBound=ratioBound, decoyRate=decoyRate, ndecoy=ndecoy, minGap=minGap,
 		minRuns=minRuns, minPixels=minPixels)
 	metadata(ans) <- list(pairs=targets, decoys=decoys,
 		runScores=runScores[seq_len(nt),,drop=FALSE], params=params)
@@ -186,8 +186,8 @@ setMethod("groupIsotopes", "MSImagingExperiment",
 		slopes=slopes[,npixels >= minPixels,drop=FALSE])
 }
 
-# target-decoy q-values (decoys pooled over repetitions)
-.isotope_qvalues <- function(target, decoy)
+# decoy rates (decoys pooled over repetitions)
+.decoy_rates <- function(target, decoy)
 {
 	q <- rep.int(NA_real_, length(target))
 	s <- target[!is.na(target)]

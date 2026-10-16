@@ -47,10 +47,10 @@ test_that("groupIsotopes", {
 	expect_equal(iso$group, match(fdata$mol, unique(fdata$mol)))
 	expect_true(all(iso$size == 3L))
 	expect_equal(nrow(x[iso$isotope == 0L,]), length(mono))
-	expect_false(is.unsorted(rev(pairs$fdr[order(pairs$score)])))
-	expect_true(all(pairs$fdr > 0))
+	expect_false(is.unsorted(rev(pairs$decoyRate[order(pairs$score)])))
+	expect_true(all(pairs$decoyRate > 0))
 	expect_true(all(pairs$status %in%
-		c("accepted", "redundant", "ratio", "fdr")))
+		c("accepted", "redundant", "ratio", "decoy_rate")))
 	linked <- pairs[pairs$status %in% c("accepted", "redundant"),]
 	best <- vapply(seq_len(nrow(iso)), function(f)
 		max(linked$score[linked$i == f | linked$j == f]), numeric(1L))
@@ -97,13 +97,13 @@ test_that("groupIsotopes", {
 	expect_no_error(groupIsotopes(y, tolerance=10))
 	expect_no_error(groupIsotopes(x, tolerance=10, nchunks=4L))
 
-	# q-values match a direct calculation
+	# decoy rates match a direct calculation
 	s <- c(0.95, 0.9, 0.85, 0.8, 0.3, 0.2)
 	d <- c(0.82, 0.25, rep(0.1, 10))
-	q <- Cardinal:::.isotope_qvalues(s, d)
-	# fdr = (decoys >= s + 1) * (6 / 12) / (targets >= s)
-	fdr <- c(1/1, 1/2, 1/3, 2/4, 2/5, 3/6) * 0.5
-	expect_equal(q, rev(cummin(rev(fdr))))
+	r <- Cardinal:::.decoy_rates(s, d)
+	# rate = (decoys >= s + 1) * (6 / 12) / (targets >= s)
+	rate <- c(1/1, 1/2, 1/3, 2/4, 2/5, 3/6) * 0.5
+	expect_equal(r, rev(cummin(rev(rate))))
 
 })
 
@@ -171,7 +171,7 @@ test_that("groupIsotopes - tolerance and errors", {
 	expect_error(groupIsotopes(x, tolerance=10, ratioBound=0))
 	expect_error(groupIsotopes(x, tolerance=c(5, 10)))
 	expect_error(groupIsotopes(x, tolerance=NA))
-	expect_error(groupIsotopes(x, tolerance=10, fdr=NA))
+	expect_error(groupIsotopes(x, tolerance=10, decoyRate=NA))
 	expect_error(groupIsotopes(x, tolerance=10, charge=5L)) # no candidates
 	expect_error(groupIsotopes(x, tolerance=10, minPixels=1000L))
 
@@ -181,7 +181,7 @@ test_that("groupIsotopes - tolerance and errors", {
 	spectra(y)[k,] <- t(apply(spectra(y)[k,], 1L, sample))
 	expect_warning(iso3 <- groupIsotopes(y, tolerance=10))
 	expect_true(all(iso3$isotope == 0L))
-	expect_true(all(metadata(iso3)$pairs$status == "fdr"))
+	expect_true(all(metadata(iso3)$pairs$status == "decoy_rate"))
 
 	centroided(x) <- FALSE
 	expect_error(groupIsotopes(x, tolerance=10))
