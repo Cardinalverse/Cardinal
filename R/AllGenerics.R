@@ -44,7 +44,7 @@ setGeneric("peakProcess", function(object, ...) standardGeneric("peakProcess"))
 ## ------------------------------------------
 setGeneric("coregister", function(object, ref, ...) standardGeneric("coregister"))
 setGeneric("colocalized", function(object, ...) standardGeneric("colocalized"))
-setGeneric("groupIsotopes", function(object, ...) standardGeneric("groupIsotopes"))
+setGeneric("findIsotopesByCorr", function(object, ...) standardGeneric("findIsotopesByCorr"))
 
 #### Spatial utilities ####
 ## ---------------------

@@ -3,8 +3,10 @@
 
 ## New features
 
-* Added 'groupIsotopes()' for grouping isotope peaks by m/z spacing
+* Added 'findIsotopesByCorr()' for grouping isotope peaks by m/z spacing
         and image correlation, with a target-decoy score cutoff
+
+* Added 'monoisotopes()' for keeping one feature per isotope group
 
 # Cardinal 3.13.4 (2026-04-24)
 

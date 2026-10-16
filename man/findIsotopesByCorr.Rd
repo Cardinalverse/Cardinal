@@ -1,27 +1,30 @@
 \encoding{UTF-8}
 
-\name{groupIsotopes}
+\name{findIsotopesByCorr}
 
-\alias{groupIsotopes}
-\alias{groupIsotopes,MSImagingExperiment-method}
+\alias{findIsotopesByCorr}
+\alias{findIsotopesByCorr,MSImagingExperiment-method}
+\alias{monoisotopes}
 
-\title{Group isotope peaks}
+\title{Find isotope peaks by correlation}
 
 \description{
     Group mass features into isotope envelopes based on their m/z spacing and image similarity, using decoy pairs to choose a score cutoff.
 }
 
 \usage{
-\S4method{groupIsotopes}{MSImagingExperiment}(object, tolerance, units = c("ppm", "mz"),
+\S4method{findIsotopesByCorr}{MSImagingExperiment}(object, tolerance, units = c("ppm", "mz"),
     charge = 1L, maxOrder = 3L, maxGroupOrder = 6L,
     ratioBound = 2, decoyRate = 0.05, ndecoy = 100L,
     minRuns = 1L, minPixels = 20L,
     verbose = getCardinalVerbose(), chunkopts = list(),
     BPPARAM = getCardinalBPPARAM(), \dots)
+
+monoisotopes(object)
 }
 
 \arguments{
-    \item{object}{A centroided (peak-picked) imaging experiment.}
+    \item{object}{A centroided (peak-picked) imaging experiment. For \code{monoisotopes()}, the result of \code{findIsotopesByCorr()}.}
 
     \item{tolerance}{The tolerance for matching the m/z spacing of an isotope pair. This should be close to the mass accuracy of the data (see Details).}
 
@@ -61,13 +64,13 @@
 
     Accepted pairs are merged into groups in order of decreasing score. Isotope orders are summed along the merged pairs. A merge is refused if it would put two features at the same isotope order or extend a group beyond \code{maxGroupOrder}. This prevents a single false pair from joining two envelopes.
 
-    Isotope order 0 is the lightest observed feature in a group, which is not necessarily the monoisotopic peak if that peak was not detected. Keeping the features with order 0 keeps one feature per group.
+    Isotope order 0 is the lightest observed feature in a group, which is not necessarily the monoisotopic peak if that peak was not detected. Use \code{monoisotopes()} to keep the features with order 0, which keeps one feature per group.
 
     Co-localized species with nearly the same m/z as an isotope can be mistaken for it. For example, two 13C atoms and two hydrogens (one double bond) differ by 0.0089 Da, which is within a 10 ppm tolerance above m/z 894. A tolerance close to the mass accuracy of the data reduces this. The m/z errors of the candidate pairs are given by \code{ppm} in \code{metadata(object)$pairs}, and the accepted pairs can be used to check the tolerance. Weak isotopes with many zero intensities have lower correlations and may be missed. Decoy rates are calculated for pairs, not groups.
 }
 
 \value{
-    A data frame with one row for each feature of \code{object}, in the same order, with columns:
+    For \code{findIsotopesByCorr()}, a data frame with one row for each feature of \code{object}, in the same order, with columns:
 
     \itemize{
         \item \code{i}: The feature index.
@@ -84,6 +87,8 @@
     }
 
     The \code{metadata()} contains the candidate pairs with their m/z errors (\code{ppm}), scores, number of runs scored (\code{nruns}), intensity ratios (\code{ratio}), ratio limits (\code{bound}), decoy rates (\code{decoyRate}), and status (\code{pairs}), the decoy pairs (\code{decoys}), the scores of the candidate pairs in each run (\code{runScores}), and the parameters (\code{params}). The status of a pair is one of \code{"accepted"} (used to merge groups), \code{"redundant"} (both features were already in the same group), \code{"order_conflict"} or \code{"span"} (the merge was refused), \code{"ratio"} (the intensity ratio was too high), \code{"decoy_rate"} (the decoy rate was greater than \code{decoyRate}), or \code{"not_evaluable"} (the pair could not be scored).
+
+    For \code{monoisotopes()}, the rows of \code{object} with isotope order 0.
 }
 
 \references{
@@ -114,9 +119,10 @@ for ( k in seq_along(mono) ) {
 mse <- simulateImage(pdata, fdata, resolution=5000, by=100, centroided=TRUE)
 
 # find isotopes and keep one feature per group
-iso <- groupIsotopes(mse, tolerance=10)
+iso <- findIsotopesByCorr(mse, tolerance=10)
 iso
-mse[iso$isotope == 0L,]
+mono <- monoisotopes(iso)
+mse[mono$i,]
 }
 
 \keyword{methods}
