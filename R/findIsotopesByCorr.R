@@ -1,8 +1,8 @@
 
-#### Group isotopes ####
-## ---------------------
+#### Find isotopes by correlation ####
+## ------------------------------------
 
-setMethod("groupIsotopes", "MSImagingExperiment",
+setMethod("findIsotopesByCorr", "MSImagingExperiment",
 	function(object, tolerance, units = c("ppm", "mz"),
 		charge = 1L, maxOrder = 3L, maxGroupOrder = 6L,
 		ratioBound = 2, decoyRate = 0.05, ndecoy = 100L,
@@ -110,6 +110,14 @@ setMethod("groupIsotopes", "MSImagingExperiment",
 		runScores=runScores[seq_len(nt),,drop=FALSE], params=params)
 	ans
 })
+
+# keep the lightest feature in each isotope group
+monoisotopes <- function(object)
+{
+	if ( !all(c("i", "isotope") %in% names(object)) )
+		.Error("'object' must be the result of findIsotopesByCorr()")
+	object[object$isotope == 0L,,drop=FALSE]
+}
 
 # find candidate pairs (i, j) with mz[j] ~ mz[i] + k * step
 .isotope_pairs <- function(mz, tol, step, orders)

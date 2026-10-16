@@ -157,19 +157,20 @@ mse_iso <- simulateImage(pdata, fdata, resolution=5000, by=100,
 	centroided=TRUE)
 ```
 
-Use `groupIsotopes()` to group the features into isotope envelopes. Candidate pairs are matched by their *m/z* spacing and scored by the correlation of their images within each run. Decoy pairs of features that are too far apart to be isotopes are used to choose a score cutoff.
+Use `findIsotopesByCorr()` to group the features into isotope envelopes. Candidate pairs are matched by their *m/z* spacing and scored by the correlation of their images within each run. Decoy pairs of features that are too far apart to be isotopes are used to choose a score cutoff.
 
 The `tolerance` should be close to the mass accuracy of the data. It is not the same as the (wider) tolerance used by `peakAlign()`.
 
 ```{r isotopes}
-iso <- groupIsotopes(mse_iso, tolerance=10)
+iso <- findIsotopesByCorr(mse_iso, tolerance=10)
 iso
 ```
 
-The result has one row for each feature, in the same order. Isotope order 0 is the lightest feature in each group, so we keep those to keep one feature per molecule.
+The result has one row for each feature, in the same order. Isotope order 0 is the lightest feature in each group. Use `monoisotopes()` to keep those, which keeps one feature per molecule.
 
 ```{r isotopes-subset}
-mse_iso[iso$isotope == 0L,]
+mono <- monoisotopes(iso)
+mse_iso[mono$i,]
 ```
 
 The scores of the candidate pairs and the decoys are stored in the `metadata()` and can be compared to check the separation.
