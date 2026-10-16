@@ -56,9 +56,13 @@ setMethod("findIsotopesByCorr", "MSImagingExperiment",
 	nt <- nrow(targets)
 	i <- c(targets$i, decoys$i)
 	j <- c(targets$j, decoys$j)
-	cors <- .isotope_cor(object, i, j, minPixels,
+	# score each distinct pair once
+	key <- paste(i, j)
+	u <- !duplicated(key)
+	cors <- .isotope_cor(object, i[u], j[u], minPixels,
 		verbose=verbose, chunkopts=chunkopts, BPPARAM=BPPARAM)
-	runScores <- cors$scores
+	k <- match(key, key[u])
+	runScores <- cors$scores[k,,drop=FALSE]
 	nruns <- rowSums(!is.na(runScores))
 	score <- rep.int(NA_real_, length(i))
 	ok <- nruns >= max(1L, minRuns)
@@ -69,7 +73,7 @@ setMethod("findIsotopesByCorr", "MSImagingExperiment",
 	decoys$nruns <- nruns[-seq_len(nt)]
 	# intensity ratios and their all-carbon upper bound (13C only)
 	lambda <- 0.0107 / 0.9893 * floor(charge * targets$mz.i / 12)
-	targets$ratio <- apply(cors$slopes[seq_len(nt),,drop=FALSE], 1L,
+	targets$ratio <- apply(cors$slopes[k[seq_len(nt)],,drop=FALSE], 1L,
 		median, na.rm=TRUE)
 	targets$bound <- lambda^targets$order / factorial(targets$order)
 	# estimate decoy rates and group isotopes
@@ -136,20 +140,18 @@ monoisotopes <- function(object)
 	ans
 }
 
-# pair each anchor with random partners more than minGap away
+# pair each anchor with up to n distinct partners more than minGap away
 .decoy_pairs <- function(i, mz, minGap, n)
 {
-	ok <- mz[i] - mz[1L] > minGap | mz[length(mz)] - mz[i] > minGap
-	j <- lapply(seq_len(n), function(r) {
-		j <- rep.int(NA_integer_, length(i))
-		todo <- ok
-		while ( any(todo) ) {
-			j[todo] <- sample.int(length(mz), sum(todo), replace=TRUE)
-			todo <- ok & abs(mz[j] - mz[i]) <= minGap
-		}
-		j
+	# partners are features 1..lo and hi+1..length(mz)
+	lo <- findInterval(mz[i] - minGap, mz, left.open=TRUE)
+	hi <- findInterval(mz[i] + minGap, mz)
+	m <- lo + length(mz) - hi
+	j <- lapply(seq_along(i), function(a) {
+		u <- sample.int(m[a], min(n, m[a]))
+		ifelse(u <= lo[a], u, u + hi[a] - lo[a])
 	})
-	data.frame(i=rep.int(i, n), j=unlist(j))
+	data.frame(i=rep.int(i, lengths(j)), j=as.integer(unlist(j)))
 }
 
 # Pearson correlation of pairs (i, j) within each run

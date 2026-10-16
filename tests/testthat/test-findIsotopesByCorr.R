@@ -50,6 +50,14 @@ test_that("findIsotopesByCorr", {
 	expect_equal(m$i, which(fdata$order == 0L))
 	expect_equal(nrow(x[m$i,]), length(mono))
 	expect_error(monoisotopes(pairs))
+
+	# decoys are far enough away and distinct for each candidate pair
+	decoys <- metadata(iso)$decoys
+	minGap <- metadata(iso)$params$minGap
+	expect_true(all(abs(mz(x)[decoys$j] - mz(x)[decoys$i]) > minGap))
+	once <- decoys$i %in% which(tabulate(pairs$i, nrow(x)) == 1L)
+	expect_false(anyDuplicated(decoys[once,c("i", "j")]) > 0L)
+	expect_lt(nrow(decoys), 100L * nrow(pairs))
 	expect_false(is.unsorted(rev(pairs$decoyRate[order(pairs$score)])))
 	expect_true(all(pairs$decoyRate > 0))
 	expect_true(all(pairs$status %in%
