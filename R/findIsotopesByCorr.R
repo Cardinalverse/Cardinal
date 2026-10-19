@@ -80,6 +80,7 @@ setMethod("findIsotopesByCorr", "MSImagingExperiment",
 	targets$decoyRate <- .decoy_rates(targets$score, decoys$score)
 	pass <- !is.na(targets$decoyRate) & targets$decoyRate <= decoyRate
 	targets$status <- ifelse(is.na(targets$score), "not_evaluable", "decoy_rate")
+	high <- logical(nt)
 	if ( !is.na(ratioBound) ) {
 		high <- pass & !is.na(targets$ratio) &
 			targets$ratio > ratioBound * targets$bound
@@ -90,7 +91,7 @@ setMethod("findIsotopesByCorr", "MSImagingExperiment",
 		.Warn("no isotope pairs pass decoyRate = ", decoyRate)
 	groups <- .merge_isotopes(length(mz), targets$i[pass], targets$j[pass],
 		targets$order[pass], targets$score[pass], targets$ppm[pass],
-		maxGroupOrder)
+		maxGroupOrder, targets$i[high], targets$j[high])
 	targets$status[pass] <- groups$status
 	.Log("found ", sum(groups$status == "accepted"), " isotope links ",
 		"at decoyRate = ", decoyRate, message=verbose)
@@ -216,7 +217,9 @@ monoisotopes <- function(object)
 }
 
 # merge pairs into groups (strongest first) without order conflicts
-.merge_isotopes <- function(n, i, j, order, score, resid, maxGroupOrder)
+# or both features of a pair rejected by the ratio bound (ri, rj)
+.merge_isotopes <- function(n, i, j, order, score, resid, maxGroupOrder,
+	ri = integer(), rj = integer())
 {
 	parent <- seq_len(n)
 	members <- as.list(parent)
@@ -245,6 +248,8 @@ monoisotopes <- function(object)
 			status[e] <- "order_conflict"
 		} else if ( max(km) > maxGroupOrder ) {
 			status[e] <- "span"
+		} else if ( any(ri %in% m & rj %in% m) ) {
+			status[e] <- "ratio_conflict"
 		} else {
 			parent[max(a, b)] <- min(a, b)
 			members[[min(a, b)]] <- m

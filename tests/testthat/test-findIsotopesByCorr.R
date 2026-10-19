@@ -161,6 +161,13 @@ test_that("findIsotopesByCorr - order conflict", {
 	expect_true(any(pairs2$j == pc341 & pairs2$status == "ratio"))
 	expect_equal(iso2$isotope[pc341], 0L)
 
+	# a pair rejected by the ratio bound can't join through another pair
+	g <- Cardinal:::.merge_isotopes(3L, i=c(2L, 1L), j=c(3L, 3L),
+		order=c(1L, 2L), score=c(0.9, 0.8), resid=c(0, 0),
+		maxGroupOrder=6L, ri=1L, rj=2L)
+	expect_equal(g$status, c("accepted", "ratio_conflict"))
+	expect_equal(g$order, c(0L, 0L, 1L))
+
 })
 
 test_that("findIsotopesByCorr - tolerance and errors", {
