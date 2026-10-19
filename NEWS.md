@@ -1,5 +1,5 @@
 
-# Cardinal 3.15.1 (2026-10-14)
+# Cardinal 3.15.0 (2026-10-14)
 
 ## New features
 
