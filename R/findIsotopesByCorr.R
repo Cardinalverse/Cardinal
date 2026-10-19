@@ -160,18 +160,20 @@ monoisotopes <- function(object)
 	verbose, chunkopts, BPPARAM)
 {
 	run <- droplevels(run(object))
-	means <- rowStats(spectra(object), stat="mean", group=run,
+	stats <- rowStats(spectra(object), stat=c("mean", "var"), group=run,
 		simplify=FALSE, verbose=verbose,
-		chunkopts=chunkopts, BPPARAM=BPPARAM)$mean
-	means <- matrix(as.vector(means), ncol=nlevels(run))
-	# sums of squares and cross-products about the run means
+		chunkopts=chunkopts, BPPARAM=BPPARAM)
+	means <- matrix(as.vector(stats$mean), ncol=nlevels(run))
+	npixels <- table(run)
+	# sums of squares about the run means
+	ss <- matrix(as.vector(stats$var), ncol=nlevels(run))
+	ss <- sweep(ss, 2L, npixels - 1L, "*")
+	# cross-products about the run means
 	FUN <- isofun(function(x, run, means, i, j) {
 		g <- run[attr(x, "index")]
-		ss <- matrix(0, nrow=nrow(x), ncol=nlevels(run))
 		sp <- matrix(0, nrow=length(i), ncol=nlevels(run))
 		for ( r in which(levels(run) %in% g) ) {
 			y <- x[,g == levels(run)[r],drop=FALSE] - means[,r]
-			ss[,r] <- rowSums(y^2)
 			# limit size of pair-by-pixel blocks
 			b <- max(1L, floor(1e7 / ncol(y)))
 			for ( s in seq.int(1L, length(i), by=b) ) {
@@ -179,19 +181,17 @@ monoisotopes <- function(object)
 				sp[e,r] <- rowSums(y[i[e],,drop=FALSE] * y[j[e],,drop=FALSE])
 			}
 		}
-		list(ss=ss, sp=sp)
+		sp
 	}, CardinalEnv())
 	ans <- chunk_colapply(spectra(object), FUN,
 		run=run, means=means, i=i, j=j, simplify=list,
 		verbose=verbose, chunkopts=chunkopts, BPPARAM=BPPARAM)
-	ss <- Reduce(`+`, lapply(ans, `[[`, "ss"))
-	sp <- Reduce(`+`, lapply(ans, `[[`, "sp"))
+	sp <- Reduce(`+`, ans)
 	# correlations and slopes of j on i
 	cors <- sp / sqrt(ss[i,,drop=FALSE] * ss[j,,drop=FALSE])
 	slopes <- sp / ss[i,,drop=FALSE]
 	cors[!is.finite(cors)] <- NA_real_
 	slopes[!is.finite(cors)] <- NA_real_
-	npixels <- table(run)
 	dimnames(cors) <- dimnames(slopes) <- list(NULL, levels(run))
 	list(scores=cors[,npixels >= minPixels,drop=FALSE],
 		slopes=slopes[,npixels >= minPixels,drop=FALSE])
