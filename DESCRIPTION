@@ -13,7 +13,7 @@ License: Artistic-2.0 | file LICENSE
 Depends: R (>= 4.4), BiocParallel, BiocGenerics,
 	ProtGenerics, S4Vectors, methods, stats, stats4
 Imports: CardinalIO, Biobase, graphics, grDevices,
-	irlba, Matrix, matter (>= 2.7.10), nlme, parallel, utils
+	irlba, Matrix, matter (>= 2.15.0), nlme, parallel, utils
 Suggests: BiocStyle, testthat, knitr, rmarkdown, emmeans, lme4, lmerTest
 VignetteBuilder: knitr
 biocViews: Software, Infrastructure, Proteomics, Lipidomics,

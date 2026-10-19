@@ -1,4 +1,13 @@
 
+# Cardinal 3.15.0 (2026-10-14)
+
+## New features
+
+* Added 'findIsotopesByCorr()' for grouping isotope peaks by m/z spacing
+        and image correlation, with a target-decoy score cutoff
+
+* Added 'monoisotopes()' for keeping one feature per isotope group
+
 # Cardinal 3.13.4 (2026-04-24)
 
 ## Major changes
