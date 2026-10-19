@@ -71,11 +71,10 @@ setMethod("findIsotopesByCorr", "MSImagingExperiment",
 	targets$nruns <- nruns[seq_len(nt)]
 	decoys$score <- score[-seq_len(nt)]
 	decoys$nruns <- nruns[-seq_len(nt)]
-	# intensity ratios and their all-carbon upper bound (13C only)
-	lambda <- 0.0107 / 0.9893 * floor(charge * targets$mz.i / 12)
+	# intensity ratios and their upper bound
 	targets$ratio <- apply(cors$slopes[k[seq_len(nt)],,drop=FALSE], 1L,
 		median, na.rm=TRUE)
-	targets$bound <- lambda^targets$order / factorial(targets$order)
+	targets$bound <- .isotope_ratio_bound(targets$mz.i, targets$order, charge)
 	# estimate decoy rates and group isotopes
 	targets$decoyRate <- .decoy_rates(targets$score, decoys$score)
 	pass <- !is.na(targets$decoyRate) & targets$decoyRate <= decoyRate
@@ -195,6 +194,14 @@ monoisotopes <- function(object)
 	dimnames(cors) <- dimnames(slopes) <- list(NULL, levels(run))
 	list(scores=cors[,npixels >= minPixels,drop=FALSE],
 		slopes=slopes[,npixels >= minPixels,drop=FALSE])
+}
+
+# upper bound on the M+order / M+0 intensity ratio
+# if every heavy atom were carbon (13C only)
+.isotope_ratio_bound <- function(mz, order, charge)
+{
+	lambda <- 0.0107 / 0.9893 * floor(charge * mz / 12)
+	lambda^order / factorial(order)
 }
 
 # decoy rates (decoys pooled over repetitions)
