@@ -137,6 +137,54 @@ image(mse, mz=coloc$mz[1:3], layout=c(1,3))
 ```
 
 
+## Isotope grouping
+
+Most molecules produce several peaks spaced about 1.0034 / *z* apart in *m/z* (an isotope envelope), mostly due to naturally occurring carbon-13. Because these peaks come from the same molecules, their images are nearly identical. Grouping them avoids analyzing the same molecule as several features.
+
+We simulate a dataset with 5 molecules, each with 3 isotope peaks (M+0, M+1, M+2) that share an image.
+
+```{r isotopes-data}
+set.seed(2020, kind="L'Ecuyer-CMRG")
+pdata <- PositionDataFrame(coord=expand.grid(x=1:24, y=1:24))
+mono <- c(1012.2, 1118.3, 1240.4, 1377.5, 1503.6)
+fdata <- MassDataFrame(mz=as.vector(outer(0:2 * 1.0033548, mono, "+")))
+for ( k in seq_along(mono) ) {
+	nm <- paste0("m", k)
+	pdata <- addShape(pdata, center=runif(2, 6, 19), size=5, name=nm)
+	fdata[[nm]] <- ifelse(rep(seq_along(mono), each=3) == k, c(10, 8, 6), 0)
+}
+mse_iso <- simulateImage(pdata, fdata, resolution=5000, by=100,
+	centroided=TRUE)
+```
+
+Use `findIsotopesByCorr()` to group the features into isotope envelopes. Candidate pairs are matched by their *m/z* spacing and scored by the correlation of their images within each run. Decoy pairs of features that are too far apart to be isotopes are used to choose a score cutoff.
+
+The `tolerance` should be close to the mass accuracy of the data. It is not the same as the (wider) tolerance used by `peakAlign()`.
+
+```{r isotopes}
+iso <- findIsotopesByCorr(mse_iso, tolerance=10)
+iso
+```
+
+The result has one row for each feature, in the same order. Isotope order 0 is the lightest feature in each group. Use `monoisotopes()` to keep those, which keeps one feature per molecule.
+
+```{r isotopes-subset}
+mono <- monoisotopes(iso)
+mse_iso[mono$i,]
+```
+
+The scores of the candidate pairs and the decoys are stored in the `metadata()` and can be compared to check the separation.
+
+```{r isotopes-scores, fig.height=4, fig.width=5, fig.align='center'}
+pairs <- metadata(iso)$pairs
+decoys <- metadata(iso)$decoys
+breaks <- seq(-1, 1, by=0.05)
+hist(decoys$score, breaks=breaks, freq=FALSE, col="gray",
+	main="", xlab="correlation")
+hist(pairs$score, breaks=breaks, freq=FALSE, col="steelblue", add=TRUE)
+```
+
+
 
 
 
